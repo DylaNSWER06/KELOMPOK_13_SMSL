@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: localhost:3306
--- Waktu pembuatan: 22 Bulan Mei 2025 pada 12.15
+-- Waktu pembuatan: 22 Bulan Mei 2025 pada 16.15
 -- Versi server: 8.0.30
 -- Versi PHP: 8.1.10
 
@@ -25,6 +25,84 @@ DELIMITER $$
 --
 -- Prosedur
 --
+CREATE DEFINER=`root`@`localhost` PROCEDURE `analisis_penggunaan_sparepart` (IN `tanggal_mulai` DATE, IN `tanggal_akhir` DATE)   BEGIN
+    DECLARE done INT DEFAULT FALSE;
+    DECLARE sparepart_id INT;
+    DECLARE sparepart_nama VARCHAR(100);
+    DECLARE total_penggunaan INT;
+    DECLARE total_nilai DECIMAL(10,2);
+    DECLARE persentase DECIMAL(5,2);
+    DECLARE total_keseluruhan DECIMAL(10,2);
+    
+    -- Cursor untuk mengambil data sparepart yang digunakan
+    DECLARE cur CURSOR FOR 
+        SELECT 
+            s.id_sparepart,
+            s.nama_part,
+            SUM(ds.qty) as total_qty,
+            SUM(ds.qty * s.harga) as total_harga
+        FROM 
+            detail_sparepart ds
+            JOIN sparepart s ON ds.id_sparepart = s.id_sparepart
+            JOIN servis sv ON ds.id_servis = sv.id_servis
+        WHERE 
+            sv.tanggal_masuk BETWEEN tanggal_mulai AND tanggal_akhir
+        GROUP BY 
+            s.id_sparepart
+        ORDER BY 
+            total_qty DESC;
+    
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+    
+    -- Hitung total keseluruhan nilai sparepart
+    SELECT IFNULL(SUM(ds.qty * s.harga), 0) INTO total_keseluruhan
+    FROM 
+        detail_sparepart ds
+        JOIN sparepart s ON ds.id_sparepart = s.id_sparepart
+        JOIN servis sv ON ds.id_servis = sv.id_servis
+    WHERE 
+        sv.tanggal_masuk BETWEEN tanggal_mulai AND tanggal_akhir;
+    
+    -- Buat tabel temporary untuk menyimpan hasil analisis
+    DROP TEMPORARY TABLE IF EXISTS temp_analisis_sparepart;
+    CREATE TEMPORARY TABLE temp_analisis_sparepart (
+        id_sparepart INT,
+        nama_sparepart VARCHAR(100),
+        jumlah_penggunaan INT,
+        nilai_total DECIMAL(10,2),
+        persentase_nilai DECIMAL(5,2)
+    );
+    
+    -- Buka cursor dan loop melalui data
+    OPEN cur;
+    
+    read_loop: LOOP
+        FETCH cur INTO sparepart_id, sparepart_nama, total_penggunaan, total_nilai;
+        
+        IF done THEN
+            LEAVE read_loop;
+        END IF;
+        
+        -- Hitung persentase dari total nilai
+        IF total_keseluruhan > 0 THEN
+            SET persentase = (total_nilai / total_keseluruhan) * 100;
+        ELSE
+            SET persentase = 0;
+        END IF;
+        
+        -- Masukkan data ke tabel temporary
+        INSERT INTO temp_analisis_sparepart 
+        VALUES (sparepart_id, sparepart_nama, total_penggunaan, total_nilai, persentase);
+        
+    END LOOP;
+    
+    CLOSE cur;
+    
+    -- Tampilkan hasil analisis
+    SELECT * FROM temp_analisis_sparepart;
+    
+END$$
+
 CREATE DEFINER=`root`@`localhost` PROCEDURE `kurangi_stok_sparepart` (IN `p_id_servis` INT)   BEGIN
   DECLARE done INT DEFAULT FALSE;
   DECLARE v_id_sparepart INT;
@@ -87,6 +165,31 @@ CREATE DEFINER=`root`@`localhost` PROCEDURE `update_status_servis` (IN `p_id_ser
 END$$
 
 DELIMITER ;
+
+-- --------------------------------------------------------
+
+--
+-- Struktur dari tabel `admin`
+--
+
+CREATE TABLE `admin` (
+  `id_admin` int NOT NULL,
+  `username` varchar(50) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  `nama_lengkap` varchar(100) NOT NULL,
+  `level` enum('admin','teknisi','kasir') NOT NULL DEFAULT 'admin',
+  `status` enum('aktif','nonaktif') NOT NULL DEFAULT 'aktif',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
+-- Dumping data untuk tabel `admin`
+--
+
+INSERT INTO `admin` (`id_admin`, `username`, `password`, `nama_lengkap`, `level`, `status`, `created_at`) VALUES
+(1, 'admin', 'admin123', 'Administrator', 'admin', 'aktif', '2025-05-22 12:35:58'),
+(2, 'teknisi1', 'teknisi1', 'Teknisi Satu', 'teknisi', 'aktif', '2025-05-22 12:35:58'),
+(3, 'kasir1', '$2y$10$YfxCS0TDmGZEHtJBs3/6eeJd.fUXnxw9bj1.aUuPaQJcQJJDYLBcO', 'Kasir Satu', 'kasir', 'aktif', '2025-05-22 12:35:58');
 
 -- --------------------------------------------------------
 
@@ -298,7 +401,8 @@ INSERT INTO `sparepart` (`id_sparepart`, `nama_part`, `stok`, `harga`) VALUES
 (7, 'Motherboard ATX', 5, 1200000.00),
 (8, 'Charger Laptop', 18, 200000.00),
 (9, 'LCD Screen', 8, 500000.00),
-(10, 'Harddisk 1TB', 7, 700000.00);
+(10, 'Harddisk 1TB', 7, 700000.00),
+(11, 'VGA RTX 4090', 3, 18000000.00);
 
 -- --------------------------------------------------------
 
@@ -405,6 +509,13 @@ CREATE TABLE `view_stok_sparepart` (
 --
 
 --
+-- Indeks untuk tabel `admin`
+--
+ALTER TABLE `admin`
+  ADD PRIMARY KEY (`id_admin`),
+  ADD UNIQUE KEY `username` (`username`);
+
+--
 -- Indeks untuk tabel `detail_layanan`
 --
 ALTER TABLE `detail_layanan`
@@ -457,6 +568,12 @@ ALTER TABLE `teknisi`
 --
 
 --
+-- AUTO_INCREMENT untuk tabel `admin`
+--
+ALTER TABLE `admin`
+  MODIFY `id_admin` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
 -- AUTO_INCREMENT untuk tabel `detail_layanan`
 --
 ALTER TABLE `detail_layanan`
@@ -490,7 +607,7 @@ ALTER TABLE `servis`
 -- AUTO_INCREMENT untuk tabel `sparepart`
 --
 ALTER TABLE `sparepart`
-  MODIFY `id_sparepart` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
+  MODIFY `id_sparepart` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
 
 --
 -- AUTO_INCREMENT untuk tabel `teknisi`
